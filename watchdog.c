@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2013 Felix Fietkau <nbd@openwrt.org>
  * Copyright (C) 2013 John Crispin <blogic@openwrt.org>
+ * Copyright (C) 2017 Mateusz Banaszek
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License version 2.1
@@ -17,9 +18,11 @@
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 
 #include <unistd.h>
+#include <stdlib.h>
 
 #include <libubox/uloop.h>
 
@@ -28,9 +31,61 @@
 
 #define WDT_PATH	"/dev/watchdog"
 
+#define WATCHDOG_CLIENT "watchdog-client"
+#define WATCHDOG_CLIENT_RESTART_CODE (64)
+#define WDTE_FREQUENCY (12) // fires every (WDTE_FREQUENCY * wdt_frequency) seconds
+#define WDTE_FAILURES_THRESHOLD (5)
+
 static struct uloop_timeout wdt_timeout;
 static int wdt_fd = -1;
 static int wdt_frequency = 5;
+static int wdte_failures = 0;
+static int wdte_cycle = 0;
+
+
+/*
+	Runs watchdog-client.
+	Returns it's exit code or 2 if something went wrong.
+*/
+static int watchdog_run_client(void)
+{
+	int state = system(WATCHDOG_CLIENT);
+
+	if (state == -1)
+		return 2;
+	if (!WIFEXITED(state))
+		return 2;
+
+	return(WEXITSTATUS(state));
+}
+
+/*
+	Software "extension" of the hardware watchdog:
+	allows less frequent running watchdog-client.
+*/
+static void watchdog_extended(void) {
+	wdte_cycle++;
+
+	if (wdte_cycle >= WDTE_FREQUENCY) {
+		wdte_cycle = 0;
+
+		int state = watchdog_run_client();
+		switch (state) {
+			case 0:
+				wdte_failures = 0;
+				break;
+			case WATCHDOG_CLIENT_RESTART_CODE:
+				ERROR("watchdog-client responded with RESTART code\n");
+				wdte_failures = WDTE_FAILURES_THRESHOLD; // we want to restart the device
+				break;
+			default:
+				ERROR("watchdog-client responded with code %i\n", state);
+				wdte_failures++;
+				break;
+		}
+
+	}
+}
 
 void watchdog_ping(void)
 {
@@ -41,8 +96,15 @@ void watchdog_ping(void)
 
 static void watchdog_timeout_cb(struct uloop_timeout *t)
 {
-	watchdog_ping();
-	uloop_timeout_set(t, wdt_frequency * 1000);
+	watchdog_extended();
+
+	if (wdte_failures >= WDTE_FAILURES_THRESHOLD) {
+		ERROR("watchdog is restarting the device!\n");
+		uloop_timeout_cancel(t); // don't shedule the next time == watchdog will restart the device
+	} else {
+		watchdog_ping();
+		uloop_timeout_set(t, wdt_frequency * 1000);
+	}
 }
 
 void watchdog_set_stopped(bool val)
