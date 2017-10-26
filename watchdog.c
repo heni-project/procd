@@ -34,7 +34,7 @@
 #define WATCHDOG_CLIENT "watchdog-client"
 #define WATCHDOG_CLIENT_RESTART_CODE (64)
 #define WDTE_FREQUENCY (12) // fires every (WDTE_FREQUENCY * wdt_frequency) seconds
-#define WDTE_FAILURES_THRESHOLD (5)
+#define WDTE_FAILURES_THRESHOLD (15)
 
 static struct uloop_timeout wdt_timeout;
 static int wdt_fd = -1;

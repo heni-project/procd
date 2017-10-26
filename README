@@ -8,4 +8,4 @@ Forked from http://git.openwrt.org/?p=project/procd.git
 * Every 60 seconds (configurable) a watchdog-client is run.
   The device is restarted by the hardware watchdog (we stop scheduling to ping it)
   when the watchdog-client exits with status 64 or when it exits with another
-  non zero status 5 times (configurable) in a row.
+  non zero status 15 times (configurable) in a row.
